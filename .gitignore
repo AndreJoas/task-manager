@@ -33,10 +33,14 @@ Thumbs.db
 *.tfstate.*
 crash.log
 crash.*.log
-
 *.tfvars
 *.tfvars.json
 
+# Terraform override
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
 
 override.tf
 override.tf.json
