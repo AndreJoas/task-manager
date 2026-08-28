@@ -15,6 +15,21 @@ jobs:
     name: Testes da aplicação
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: admin
+          POSTGRES_DB: task_manager
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U admin -d task_manager"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
     steps:
       - name: Checkout do código
         uses: actions/checkout@v5
@@ -27,8 +42,35 @@ jobs:
       - name: Instalar dependências
         run: npm install
 
+      - name: Iniciar aplicação
+        run: npm run dev > app.log 2>&1 &
+        env:
+          DATABASE_HOST: localhost
+          DATABASE_PORT: 5432
+          DATABASE_NAME: task_manager
+          DATABASE_USER: admin
+          DATABASE_PASSWORD: admin
+
+      - name: Aguardar aplicação iniciar
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:3000/api/health > /dev/null; then
+              echo "Aplicação está disponível!"
+              break
+            fi
+
+            echo "Aguardando aplicação..."
+            sleep 2
+          done
+
       - name: Executar testes
         run: npm test
+        env:
+          DATABASE_HOST: localhost
+          DATABASE_PORT: 5432
+          DATABASE_NAME: task_manager
+          DATABASE_USER: admin
+          DATABASE_PASSWORD: admin
 
   docker:
     name: Build da imagem Docker
