@@ -15,7 +15,7 @@ test:
 name: Testes da aplicação
 runs-on: ubuntu-latest
 
-```
+
 services:
   postgres:
     image: postgres:15
@@ -182,7 +182,7 @@ steps:
       echo ""
       echo "===== PORTA 3000 ====="
       ss -lntp | grep 3000 || true
-```
+
 
 # ==============================================================
 
@@ -194,7 +194,6 @@ docker:
 name: Build da imagem Docker
 runs-on: ubuntu-latest
 
-```
 needs: test
 
 steps:
