@@ -1,226 +1,119 @@
 name: CI/CD Task Manager
 
 on:
-push:
-branches:
-- main
-- dev_atividadeAvaliativa
-
-pull_request:
-branches:
-- main
+  push:
+    branches:
+      - main
+      - dev_atividadeAvaliativa
+  pull_request:
+    branches:
+      - main
 
 jobs:
-test:
-name: Testes da aplicação
-runs-on: ubuntu-latest
+  test:
+    name: Testes da aplicação
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: admin
+          POSTGRES_DB: task_manager
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U admin -d task_manager"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v5
 
+      - name: Configurar Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
 
-services:
-  postgres:
-    image: postgres:15
+      - name: Instalar dependências
+        run: npm install
 
-    env:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin
-      POSTGRES_DB: task_manager
+      - name: Inicializar banco de dados
+        run: node init-db.js
+        env:
+          DATABASE_HOST: localhost
+          DATABASE_PORT: 5432
+          DATABASE_NAME: task_manager
+          DATABASE_USER: admin
+          DATABASE_PASSWORD: admin
 
-    ports:
-      - 5432:5432
+      - name: Iniciar aplicação
+        run: npm run dev > app.log 2>&1 &
+        env:
+          DATABASE_HOST: localhost
+          DATABASE_PORT: 5432
+          DATABASE_NAME: task_manager
+          DATABASE_USER: admin
+          DATABASE_PASSWORD: admin
 
-    options: >-
-      --health-cmd="pg_isready -U admin -d task_manager"
-      --health-interval=5s
-      --health-timeout=5s
-      --health-retries=10
+      - name: Aguardar aplicação iniciar
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://localhost:3000/api/health > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat app.log || true
+          exit 1
 
-steps:
+      - name: Executar testes
+        run: npm test
+        env:
+          DATABASE_HOST: localhost
+          DATABASE_PORT: 5432
+          DATABASE_NAME: task_manager
+          DATABASE_USER: admin
+          DATABASE_PASSWORD: admin
 
-  # ==========================================================
-  # 1. Baixar o código
-  # ==========================================================
-  - name: Checkout do código
-    uses: actions/checkout@v5
+      - name: Publicar logs da aplicação
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: application-log
+          path: app.log
+          if-no-files-found: ignore
 
+  docker:
+    name: Build e publicação da imagem Docker
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v5
 
-  # ==========================================================
-  # 2. Configurar Node.js
-  # ==========================================================
-  - name: Configurar Node.js
-    uses: actions/setup-node@v5
-    with:
-      node-version: 24
-      cache: npm
+      - name: Configurar metadados da imagem
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/task-manager
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
 
+      - name: Login no Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  # ==========================================================
-  # 3. Instalar dependências
-  # ==========================================================
-  - name: Instalar dependências
-    run: npm install
-
-
-  # ==========================================================
-  # 4. Inicializar banco de dados
-  # ==========================================================
-  - name: Inicializar banco de dados
-    run: node init-db.js
-    env:
-      DATABASE_HOST: localhost
-      DATABASE_PORT: 5432
-      DATABASE_NAME: task_manager
-      DATABASE_USER: admin
-      DATABASE_PASSWORD: admin
-
-
-  # ==========================================================
-  # 5. Iniciar aplicação
-  # ==========================================================
-  - name: Iniciar aplicação
-    run: |
-      npm run dev > app.log 2>&1 &
-
-    env:
-      DATABASE_HOST: localhost
-      DATABASE_PORT: 5432
-      DATABASE_NAME: task_manager
-      DATABASE_USER: admin
-      DATABASE_PASSWORD: admin
-
-
-  # ==========================================================
-  # 6. Aguardar aplicação iniciar
-  # ==========================================================
-  - name: Aguardar aplicação iniciar
-    run: |
-      for i in {1..30}; do
-
-        echo "Tentativa $i/30"
-
-        if curl -f http://localhost:3000/api/health > /dev/null 2>&1; then
-          echo "✅ Aplicação está disponível!"
-          exit 0
-        fi
-
-        sleep 2
-
-      done
-
-      echo "❌ A aplicação não iniciou."
-      echo ""
-      echo "===== LOG DA APLICAÇÃO ====="
-      cat app.log || true
-      echo ""
-
-      exit 1
-
-
-  # ==========================================================
-  # 7. Verificar banco de dados
-  # ==========================================================
-  - name: Verificar banco de dados
-    run: |
-      echo "===== VERIFICAÇÃO DO BANCO ====="
-
-      node -e "
-      const { Client } = require('pg');
-
-      const client = new Client({
-        host: 'localhost',
-        port: 5432,
-        database: 'task_manager',
-        user: 'admin',
-        password: 'admin'
-      });
-
-      client.connect()
-        .then(() => client.query(\"SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'tasks') AS exists\"))
-        .then(result => {
-          console.log('Tabela tasks existe:', result.rows[0].exists);
-
-          if (!result.rows[0].exists) {
-            console.error('❌ Tabela tasks não existe!');
-            process.exit(1);
-          }
-
-          console.log('✅ Tabela tasks existe!');
-          return client.end();
-        })
-        .catch(error => {
-          console.error('❌ Erro ao verificar banco:', error);
-          process.exit(1);
-        });
-      "
-
-
-  # ==========================================================
-  # 8. Executar testes
-  # ==========================================================
-  - name: Executar testes
-    run: npm test
-    env:
-      DATABASE_HOST: localhost
-      DATABASE_PORT: 5432
-      DATABASE_NAME: task_manager
-      DATABASE_USER: admin
-      DATABASE_PASSWORD: admin
-
-
-  # ==========================================================
-  # 9. Mostrar logs caso algo dê errado
-  # ==========================================================
-  - name: Logs finais da aplicação
-    if: always()
-    run: |
-      echo "===== LOG FINAL DA APLICAÇÃO ====="
-      cat app.log || true
-
-      echo ""
-      echo "===== PROCESSOS NODE ====="
-      ps aux | grep node || true
-
-      echo ""
-      echo "===== PORTA 3000 ====="
-      ss -lntp | grep 3000 || true
-
-
-# ==============================================================
-
-# JOB DOCKER
-
-# ==============================================================
-
-docker:
-name: Build da imagem Docker
-runs-on: ubuntu-latest
-
-needs: test
-
-steps:
-
-  # ==========================================================
-  # 1. Checkout
-  # ==========================================================
-  - name: Checkout do código
-    uses: actions/checkout@v5
-
-
-  # ==========================================================
-  # 2. Login Docker Hub
-  # ==========================================================
-  - name: Login no Docker Hub
-    uses: docker/login-action@v3
-    with:
-      username: ${{ secrets.DOCKERHUB_USERNAME }}
-      password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-
-  # ==========================================================
-  # 3. Build e Push
-  # ==========================================================
-  - name: Build e Push da imagem
-    uses: docker/build-push-action@v6
-    with:
-      context: .
-      push: true
-      tags: ${{ secrets.DOCKERHUB_USERNAME }}/task-manager:latest
+      - name: Build da imagem Docker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
