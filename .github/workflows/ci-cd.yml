@@ -1,3 +1,4 @@
+
 name: CI/CD Task Manager
 
 on:
@@ -43,7 +44,9 @@ jobs:
         run: npm install
 
       - name: Iniciar aplicação
-        run: npm run dev > app.log 2>&1 &
+        run: |
+          npm run dev > app.log 2>&1 &
+          echo $! > app.pid
         env:
           DATABASE_HOST: localhost
           DATABASE_PORT: 5432
@@ -55,13 +58,25 @@ jobs:
         run: |
           for i in {1..30}; do
             if curl -s http://localhost:3000/api/health > /dev/null; then
-              echo "Aplicação está disponível!"
-              break
+              echo "✅ Aplicação está disponível!"
+              exit 0
             fi
 
-            echo "Aguardando aplicação..."
+            echo "⏳ Aguardando aplicação... tentativa $i/30"
             sleep 2
           done
+
+          echo "❌ A aplicação não iniciou."
+          echo "===== LOG DA APLICAÇÃO ====="
+          cat app.log
+          echo "===== FIM DO LOG ====="
+
+          exit 1
+
+      - name: Verificar endpoint de saúde
+        run: |
+          echo "Verificando /api/health..."
+          curl -f http://localhost:3000/api/health
 
       - name: Executar testes
         run: npm test
@@ -71,6 +86,13 @@ jobs:
           DATABASE_NAME: task_manager
           DATABASE_USER: admin
           DATABASE_PASSWORD: admin
+
+      - name: Exibir log da aplicação em caso de falha
+        if: failure()
+        run: |
+          echo "===== LOG DA APLICAÇÃO ====="
+          cat app.log || true
+          echo "===== FIM DO LOG ====="
 
   docker:
     name: Build da imagem Docker
@@ -93,3 +115,4 @@ jobs:
           context: .
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/task-manager:latest
+
