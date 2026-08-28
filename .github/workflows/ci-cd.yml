@@ -141,5 +141,5 @@ jobs:
           echo "Docker Hub:"
           echo "docker.io/${{ secrets.DOCKERHUB_USERNAME }}/task-manager:latest"
           echo ""
-          echo "Tag do commit:"
+          echo "Tag do commit:" 
           echo "docker.io/${{ secrets.DOCKERHUB_USERNAME }}/task-manager:${{ github.sha }}"
