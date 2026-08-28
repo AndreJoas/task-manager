@@ -1,3 +1,4 @@
+
 terraform {
   required_version = ">= 1.6.0"
 
@@ -19,6 +20,8 @@ terraform {
   }
 }
 
+provider "null" {}
+
 provider "kubernetes" {
   config_path = "~/.kube/config"
 }
@@ -28,3 +31,4 @@ provider "helm" {
     config_path = "~/.kube/config"
   }
 }
+
